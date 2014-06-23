@@ -14,9 +14,9 @@ Tareas Google Drive
 
 https://docs.google.com/spreadsheet/ccc?key=0AkKm5GyPq0b1dF8xMmRTcG1tOGZ0a3hIVDlzS2hzZlE&usp=sharing
 
-Recuperem Horta Oest. Recuperem Ciutat.
+Recuperem Horta Centre. Recuperem Ciutat.
 
-http://proyectos.analizo.info/app/per-lhorta-oest-2014/
+http://proyectos.analizo.info/app/per-lhorta-centre-2014/
 
 Tareas Google Drive
 
