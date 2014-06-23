@@ -187,7 +187,8 @@ $(document).ready(function() {
                     maxExtent: task.extent,
                     maxResolution: "auto",
                     singleTile: true,
-                    ratio: 1.0
+                    ratio: 1.0,
+                    opacity: 0.75
                 });
             // Terrasit Web Map Service (WMS) - toponimia_base
             task.wms_layer_3 = new OpenLayers.Layer.WMS(" Toponimia", "http://terramapas.icv.gva.es/toponimia_base?", {
