@@ -1,0 +1,344 @@
+<!-- css -->
+<style type="text/css">
+/* common */
+.dispn{display:none}
+/* particular */
+.control-btn{float:left;margin-bottom:10px}
+.answer-btn{clear:both;float:left}
+/* Fix for Bootstrap css with Google Maps https://github.com/twitter/bootstrap/issues/1552 */
+.map_canvas label{width:auto;display:inline}
+.map_canvas img{max-width:none}
+.layersDiv label{color:white}
+/* OpenLayers.Control.LayerSwitcher */
+.olControlLayerSwitcher .layersDiv {
+    background-color: #1A1A1A;
+    color: white;
+    border-radius: 10px
+}
+</style>
+
+<!-- Messages for the user -->
+<div id="row" class="row">
+    <div id="messages" class="span6 offset2" style="height:35px;"> <!-- width:460px; + margin-left:180px; = 640px -->
+        <!-- Loading alert box -->
+        <div id="loading" class="alert alert-info dispn">
+            <a class="close">×</a>
+            <span>Cargando la tarea...</span>
+        </div>
+        <!-- Success alert box -->
+        <div id="success" class="alert alert-success dispn">
+            <a class="close">×</a>
+            <span><strong>Bien hecho</strong>, tu respuesta se ha guardado</span>
+        </div>
+        <!-- Finish alert box -->
+        <div id="finish" class="alert alert-success dispn">
+            <span><strong>Enhorabuena</strong>, has participado en todas las tareas disponibles</span>
+            <br/>
+            <div class="alert-actions">
+                <a class="btn small" href="/">Volver</a>
+                <a class="btn small" href="/app">o, ver otras aplicaciones</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!--
+Task DOM for loading the needed information.
+It uses the class="skeleton" to identify the elements that belong to the task.
+-->
+
+<!-- Items for the user -->
+<div id="skeleton" class="row skeleton"> <!-- max width:940px; -->
+    <!-- 540px + 380px = 920px -->
+    <!-- Left -->
+    <div id="left" class="span7"> <!-- width:540px; -->
+        <div id="info">
+            <h1>Identificación de zonas libres de edificación.</h1>
+            <h3>Marca mediante polígonos todas las superficies sin construir que no estén asfaltadas ni edificadas y que tengan textura de tierra o vegetación.</h3> <!-- Texto (Qué hay que hacer) -->
+        </div>
+        <!-- tile -->
+        <div id="tile">
+        </div>
+    </div>
+    <!-- Right -->
+    <div id="right" class="span5"> <!-- width:380px; -->
+        <!-- Feedback -->
+        <div id="feedback" style="margin-top:10px;">
+            <p>Estas trabajando en la tarea: <span id="task-id" class="label label-warning">#</span></p>
+            <p>Has completado: <span id="done" class="label label-info">#</span> tareas de <span id="total" class="label label-inverse">#</span></p>
+        </div>
+        <!-- Progress bar -->
+        <div id="progress_bar">
+            <div class="progress progress-striped" style="margin-bottom:10px;">
+                <div id="progress" rel="tooltip" title="#" class="bar" style="width:0%;"></div>
+            </div>
+        </div>
+        <div>
+            <p>Ejemplos de zonas / espacios a tener en cuenta:</p> <!-- Texto (Consideraciones a tener en cuenta) -->
+            <ul>
+                <li>Campos en producción.</li>
+                <li>Campos abandonados.</li>
+                <li>Solares.</li>
+                <li>Parcelas de urbanizaciones.</li>
+                <li>Parcelas de polígonos industriales.</li>
+                <li>Rotondas.</li>
+            </ul>
+        </div>
+        <!-- Controls -->
+        <div id="controls" class="btn-group" data-toggle="buttons-radio">
+            <button id="polygon" class="btn btn-inverse btn-map-ctrl control-btn"><i class="icon icon-white icon-map-marker"></i> Polígono</button>
+            <button id="modify" class="btn btn-inverse btn-map-ctrl control-btn"><i class="icon icon-white icon-edit"></i> Editar</button>
+            <button id="delete" class="btn btn-inverse btn-map-ctrl control-btn"><i class="icon icon-white icon-trash"></i> Borrar</button>
+        </div>
+        <!-- Answer buttons -->
+        <div id="answer_buttons">
+            <button id="unknown-btn" class="btn btn-submit answer-btn dispn" value="unknown"><i class="icon icon-thumbs-up"></i> No hay espacios "recuperables"</button>
+            <button id="coordinates-btn" class="btn btn-success btn-submit answer-btn dispn" value="coordinates"><i class="icon-check icon-white"></i> Enviar</button>
+        </div>
+    </div>
+</div>
+
+<!-- OpenLayers v2.13.1 -->
+<script type="text/javascript" src="http://proyectos.analizo.info/static/ol/OpenLayers.js"></script>
+
+<!-- code -->
+<script type="text/javascript">
+$(document).ready(function() {
+
+    var app_short_name = "app_short_name";
+
+    /*
+    Ortofoto digital 2010
+    Ortofoto digital 1:5,000 resolución 0,35m año 2010 de la provincia de Valencia, dispone de capa de distribución de hojas.
+    */
+
+    // Manage answer buttons
+    function enableBtn(button_id) {
+        $(button_id).removeClass("disabled");
+        $(button_id).show();
+    }
+    function disableBtn(button_id) {
+        $(button_id).addClass("disabled");
+        $(button_id).hide();
+    }
+    function enableCoordinatesButton() {
+        disableBtn("#unknown-btn");
+        enableBtn("#coordinates-btn");
+    }
+    function enableUnknownButton() {
+        disableBtn("#coordinates-btn");
+        enableBtn("#unknown-btn");
+    }
+
+    // WMS Tile size = Map size = Task tile bbox area
+    var size = 2;
+    var tile_width = (151.18118399409206610128687319486 * size).toString();
+    var tile_height = (226.77177599113809915193030979229 * size).toString();
+
+    /*
+    EPSG -> (Identifier) European Petroleum Survey Group.
+    EPSG:25830 -> ETRS89 / UTM zone 30N
+    */
+
+    // When the task is loaded, do...
+    pybossa.taskLoaded(function(task, deferred) {
+        if (!$.isEmptyObject(task)) {
+            // <div/> #map_id
+            task.div_map_id = "map_" + task.id;
+            task.div_map = $("<div/>", {id:task.div_map_id, "class":"map_canvas"});
+            task.div_map.css("width", tile_width + "px");
+            task.div_map.css("height", tile_height + "px");
+            // OpenLayers parameters
+            task.projection_EPSG_25830 = new OpenLayers.Projection("EPSG:25830");
+            task.extent = new OpenLayers.Bounds(task.info.xmin, task.info.ymin, task.info.xmax, task.info.ymax);
+            // Layers
+            // Terrasit Web Map Service (WMS) - odcv05_etrs89h30_2010
+            task.wms_layer_1 = new OpenLayers.Layer.WMS("odcv05_etrs89h30_2010", "http://terramapas.icv.gva.es/odcv05_etrs89h30_2010?", {
+                service: "WMS",
+                version: "1.3.0",
+                request: "GetMap",
+                format: "image/png",
+                transparent: true,
+                layers: ["ortofoto_2010_valencia"],
+                crs: "EPSG:25830",
+                bbox: task.info.xmin + ',' + task.info.ymin + ',' + task.info.xmax + ',' + task.info.ymax,
+                width: tile_width,
+                height: tile_height}, {
+                    isBaseLayer: true,
+                    maxExtent: task.extent,
+                    maxResolution: "auto",
+                    singleTile: true,
+                    ratio: 1.0,
+                    displayInLayerSwitcher: false
+                });
+            // Per L'Horta Web Map Service (WMS) - mascares (zona rústica)
+            task.wms_layer_2 = new OpenLayers.Layer.WMS(" Zonas ya identificadas", "http://s18426209.onlinehome-server.info/cgi-bin/mapserv.fcgi?", {
+                service: "WMS",
+                version: "1.3.0",
+                request: "GetMap",
+                map: "/srv/www/vhosts/s18426209.onlinehome-server.info/map/analizo/mascares.map",
+                format: "image/png",
+                transparent: true,
+                layers: ["mascares"],
+                crs: "EPSG:25830",
+                bbox: task.info.xmin + ',' + task.info.ymin + ',' + task.info.xmax + ',' + task.info.ymax,
+                width: tile_width,
+                height: tile_height}, {
+                    maxExtent: task.extent,
+                    maxResolution: "auto",
+                    singleTile: true,
+                    ratio: 1.0,
+                    opacity: 0.75
+                });
+            // Terrasit Web Map Service (WMS) - toponimia_base
+            task.wms_layer_3 = new OpenLayers.Layer.WMS(" Toponimia", "http://terramapas.icv.gva.es/toponimia_base?", {
+                service: "WMS",
+                version: "1.3.0",
+                request: "GetMap",
+                format: "image/png",
+                transparent: true,
+                layers: ["limites_municipales_con_nombre", "carreteras", "wms_poligonales", "wms_lineales", "wms_puntuales", "toponimia_wms", "toponimia"],
+                srs: "EPSG:25830",
+                bbox: task.info.xmin + ',' + task.info.ymin + ',' + task.info.xmax + ',' + task.info.ymax,
+                width: tile_width,
+                height: tile_height}, {
+                    maxExtent: task.extent,
+                    maxResolution: "auto",
+                    singleTile: true,
+                    ratio: 1.0
+                });
+            // Drawing layer
+            task.drawing_layer = new OpenLayers.Layer.Vector("drawing_layer", {
+                styleMap: new OpenLayers.StyleMap({ // Color for the path and polygon control.
+                    strokeColor: "rgba(255,0,0,1)",
+                    strokeWidth: 2,
+                    fillColor: "rgba(125,185,3,0.5)",
+                    pointRadius: 5
+                }),
+                displayInLayerSwitcher: false
+            });
+            // Drawing controls
+            task.drawing_layer_controls = {
+                polygon: new OpenLayers.Control.DrawFeature(
+                    task.drawing_layer,
+                    OpenLayers.Handler.Polygon,
+                    {"featureAdded": enableCoordinatesButton}),
+                modify: new OpenLayers.Control.ModifyFeature(task.drawing_layer),
+                delete: new OpenLayers.Control.SelectFeature(task.drawing_layer)
+            }
+            // Manage event - featureselected
+            task.drawing_layer.events.on({
+                featureselected: function(e) {
+                    if (!task.drawing_layer_controls["modify"].active) {
+                        if (confirm("¿Seguro que quieres eliminar este polígono?")) {
+                            task.drawing_layer.removeFeatures(task.drawing_layer.getFeatureById(e.feature.id));
+                        }
+                    }
+                }
+            });
+        }
+        deferred.resolve(task);
+    });
+
+    /*
+    Present the current task to the user.
+    Load the task data into the HTML DOM.
+    */
+
+    function loadUserProgress(task_id) {
+        pybossa.userProgress(app_short_name).done(function(data) {
+            $("#task-id").html(task_id);
+            $("#done").text(data.done);
+            $("#total").text(data.total);
+            var p = Math.round((data.done * 100) / data.total);
+            $("#progress").css("width", p.toString() + "%");
+            $("#progress").attr("title", p.toString() + "% completado");
+            $("#progress").tooltip({"placement":"left"});
+        });
+    }
+
+    pybossa.presentTask(function(task, deferred) {
+        if (!$.isEmptyObject(task)) {
+            $("#loading").fadeIn(1000);
+            loadUserProgress(task.id);
+            $(".btn-map-ctrl").off("click").on("click", function(e) {
+                // Manage the drawing layer controls (Only one can be active at a time)
+                for (key in task.drawing_layer_controls) {
+                    var ctrl = task.drawing_layer_controls[key];
+                    if (($(e.target).attr("id") == key) && (!ctrl.active)) {
+                        ctrl.activate();
+                    } else {
+                        ctrl.deactivate();
+                    }
+                }
+            });
+            // Append the "<div/> #map_id" asap otherwise OpenLayers will fail.
+            $.when($("#tile").append(task.div_map)).done(function() {
+                // OpenLayers Map
+                task.olm = new OpenLayers.Map(task.div_map_id, {
+                    div: task.div_map_id,
+                    layers: [task.drawing_layer, task.wms_layer_1, task.wms_layer_2, task.wms_layer_3],
+                    controls: [new OpenLayers.Control.LayerSwitcher()],
+                    projection: task.projection_EPSG_25830,
+                    units: "m",
+                    maxExtent: task.extent,
+                    restrictedExtent: task.extent,
+                    displayProjection: task.projection_EPSG_25830
+                });
+                task.olm.zoomToExtent(task.extent);
+                // Add drawing controls to the map.
+                for (var key in task.drawing_layer_controls) {
+                    task.olm.addControl(task.drawing_layer_controls[key]);
+                }
+            });
+            $("#polygon").removeClass("active");
+            $("#modify").removeClass("active");
+            $("#delete").removeClass("active");
+            enableUnknownButton();
+            $(".btn-submit").off("click").on("click", function(e) {
+                if (confirm("Necesitamos que confirmes el envío de tu análisis, por favor.")) {
+                    var answer = $(e.target).attr("value");
+                    if (answer == "coordinates") {
+                        // Check the number of features added to the drawing layer.
+                        var nAnswers = task.drawing_layer.features.length;
+                        if (nAnswers > 0) {
+                            // Convert the features into the GeoJSON format.
+                            var geojson = new OpenLayers.Format.GeoJSON({
+                                externalProjection: task.olm.displayProjection,
+                                internalProjection: task.olm.baseLayer.projection
+                            });
+                            // The user can provide several answers indicating areas, so the answer is a list of GeoJSON objects.
+                            answer = [];
+                            // Iterate over them and save them into the answer list variable.
+                            for (i=0; i<nAnswers; i++) {
+                                answer.push(JSON.parse(geojson.write(task.drawing_layer.features[i])));
+                            }
+                        } else {
+                            answer = "unknown";
+                        }
+                    }
+                    pybossa.saveTask(task.id, answer).done(function() {
+                        $.when(deferred.resolve()).done(function() {
+                            $("#loading").hide();
+                            $("#success").fadeIn(1000);
+                            $("#" + task.div_map_id).remove();
+                            setTimeout(function() {
+                                $("#success").fadeOut(1000);
+                            }, 1500);
+                        });
+                    });
+                }
+            });
+            $("#loading").fadeOut(1000);
+        } else {
+            $(".skeleton").fadeOut(1000);
+            setTimeout(function() {
+                $("#success").hide();
+                $("#finish").fadeIn(1000);
+            }, 1500);
+        }
+    });
+
+    pybossa.run(app_short_name);
+});
+</script>
